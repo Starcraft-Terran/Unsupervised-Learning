@@ -1,2 +1,2 @@
-# deeping learn
+# deep learning
 Lstm
