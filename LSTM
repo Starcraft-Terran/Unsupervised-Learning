@@ -1,0 +1,82 @@
+import random
+import numpy as np
+import tensorflow as tf
+
+class Make_DateSet(object):
+    def __init__(self, n_samples = 1000, min_seqlen = 3, max_seqlen = 20, max_value =1000):
+        self.seq_len = []
+        self.label = []
+        self.data = []
+        for sample in range(n_samples):
+            lenseq = random.randint(min_seqlen, max_seqlen)
+            self.seq_len.append(lenseq)
+            if random.random() < .5:
+                start_rand = random.randint(0, max_value - lenseq)
+                s = [[float(i) / max_value] for i in range(start_rand, start_rand + lenseq)]
+                s = s + [[0.] for i in range(max_seqlen - lenseq)]
+                self.data.append(s)
+                self.label.append([1., 0.])
+            else:
+                s = [[float(random.randint(0, max_value)) / max_value] for i in range(lenseq)]
+                s = s + [[0.] for i in range(max_seqlen - lenseq)]
+                self.data.append(s)
+                self.label.append([0., 1.])
+            self.batch_id = 0
+
+    def batch_next(self, batch_size):
+        if self.batch_id == len(self.data):
+            self.batch_id = 0
+        batch_data = self.data[self.batch_id : min(self.batch_id + batch_size, len(self.data))]
+        batch_label = self.label[self.batch_id : min(self.batch_id + batch_size, len(self.data))]
+        batch_seq_len = self.seq_len[self.batch_id : min(self.batch_id + batch_size, len(self.data))]
+        batch_id = min(self.batch_id + batch_size, len(self.data))
+        return batch_data, batch_label, batch_seq_len
+        
+def dynamic_lstm(x, seq_length, w, b):
+    lstm = tf.nn.rnn_cell.BasicLSTMCell(num_units = num_units,reuse=True)
+    initial_state = lstm.zero_state(batch_size, tf.float32)
+    outputs, final_state = tf.nn.dynamic_rnn(cell=lstm, inputs=x, sequence_length=seq_length, initial_state=initial_state, dtype=tf.float32)
+    index = tf.range(0, batch_size) * max_len_seq + seq_length - 1
+    outputs = tf.gather(tf.reshape(outputs, [-1, num_units]), index)
+    return tf.matmul(outputs, w) + b
+    
+if __name__ == '__main__':
+    learning_rate = 0.1
+    max_iter = 100000
+    batch_size = 32 
+    num_units = 64
+    inputs_size = 1
+    max_len_seq = 20
+    n_classes = 2
+    
+    Train_Set = Make_DateSet(n_samples=2000,min_seqlen=5,max_seqlen=20,max_value=1000)
+    Test_Set = Make_DateSet(n_samples=1000,min_seqlen=5,max_seqlen=20,max_value=1000)
+    
+    x = tf.placeholder(tf.float32, [None, max_len_seq, inputs_size])
+    y = tf.placeholder(tf.float32, [None, n_classes])
+    seq_length = tf.placeholder(tf.int32, [None])
+    w = tf.Variable(tf.truncated_normal([num_units, n_classes], dtype=tf.float32))
+    b = tf.Variable(tf.truncated_normal([n_classes], dtype=tf.float32))
+
+    pred = dynamic_lstm(x, seq_length, w, b)
+    cost = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=y, logits=pred))
+    optimizer = tf.train.GradientDescentOptimizer(learning_rate=learning_rate).minimize(cost)
+    correct_pred = tf.equal(tf.argmax(pred, 1), tf.argmax(y, 1))
+    accuracy = tf.reduce_mean(tf.cast(correct_pred, tf.float32))
+
+    with tf.Session() as sess:
+        sess.run(tf.global_variables_initializer())
+        step = 1
+        while step * batch_size < max_iter:
+            batch_x, batch_y, batch_seqlen = Train_Set.batch_next(batch_size)
+            sess.run(optimizer, feed_dict = {x:batch_x, y:batch_y, seq_length: batch_seq_len})
+            if step % 10 == 0:
+                acc = accuracy.eval(feed_dict = {x:batch_x, y:batch_y, seq_length: batch_seq_len})
+                loss = cost.eval(feed_dict = {x:batch_x, y:batch_y, seq_length: batch_seq_len})
+                print('iter' + str(step * batch_size) + ',batch_loss=' + '{:.5f}'.format(loss) +',' +  
+                      'Training Accurary=' + '{:.5f}'.format(acc))
+            step = step + 1
+    test_x = Test_Set.data
+    test_label = Test_Set.label
+    test_seq_len =Test_Set.seq_len
+    print('Test_Set:',sess.run(accuracy, feed_dict={x:test_x, y:test_label, seq_length: test_seq_len}))
